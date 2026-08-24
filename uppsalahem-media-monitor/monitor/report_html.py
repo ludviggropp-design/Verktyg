@@ -9,8 +9,11 @@ webbläsaren):
   publicerades eller när verktyget upptäckte den, i valfri riktning.
   Publicerad (senaste först) är förvalt.
 - Källfilter (kryssrutor) för att bara visa vissa kanaler.
-- Både sortering och källfilter kommer ihågs i webbläsarens localStorage
-  till nästa körning.
+- Viktning: varje artikel kan märkas positiv/neutral/negativ (grön/gul/röd)
+  genom att klicka på tre små knappar, och kan sedan filtreras på samma
+  sätt som källorna.
+- Sortering, källfilter och viktning kommer ihåg sig i webbläsarens
+  localStorage till nästa körning.
 - Klickar man på en artikel markeras den som läst (också i localStorage)
   och NY-märkningen försvinner direkt, utan att sidan behöver laddas om.
 """
@@ -30,6 +33,7 @@ _SWEDISH_MONTHS = [
 
 _SOURCE_LABELS = {
     "google_news": "Google News",
+    "bing_news": "Bing News",
     "svt_uppsala": "SVT Uppsala",
     "sr_uppland": "SR / P4 Uppland",
     "reddit": "Reddit",
@@ -38,7 +42,17 @@ _SOURCE_LABELS = {
 
 # Ordningen källorna visas i (t.ex. i filterraden). Okända källor hamnar
 # sist, alfabetiskt.
-_SOURCE_ORDER = ["google_news", "svt_uppsala", "sr_uppland", "reddit", "bluesky"]
+_SOURCE_ORDER = ["google_news", "bing_news", "svt_uppsala", "sr_uppland", "reddit", "bluesky"]
+
+# De tre viktningslägena en artikel kan märkas med, och en fjärde för
+# "inte viktad ännu" – används i filterraden. Värdena matchar det som
+# sparas i localStorage och sätts som data-weight på varje <li>.
+_WEIGHT_OPTIONS = [
+    ("positive", "Positiv"),
+    ("neutral", "Neutral"),
+    ("negative", "Negativ"),
+    ("none", "Ej viktad"),
+]
 
 # Tak för hur många historikposter som ritas ut, så filen inte växer sig
 # orimligt stor efter månader av körningar.
@@ -128,8 +142,15 @@ def _render_entry(entry: dict, is_new: bool) -> str:
 
     return f"""<li class="entry" data-id="{_esc(entry.get('id', ''))}" data-source="{_esc(source)}" data-published-ts="{published_ts:.0f}" data-discovered-ts="{discovered_ts:.0f}">
         <div class="entry-head">
-          <span class="source-tag">{_esc(_source_label(source))}</span>
-          {badge}
+          <span class="entry-tags">
+            <span class="source-tag">{_esc(_source_label(source))}</span>
+            {badge}
+          </span>
+          <span class="weight-buttons" role="group" aria-label="Vikta artikel">
+            <button type="button" class="weight-btn weight-negative" data-weight="negative" title="Negativ" aria-label="Markera som negativ" aria-pressed="false"></button>
+            <button type="button" class="weight-btn weight-neutral" data-weight="neutral" title="Neutral" aria-label="Markera som neutral" aria-pressed="false"></button>
+            <button type="button" class="weight-btn weight-positive" data-weight="positive" title="Positiv" aria-label="Markera som positiv" aria-pressed="false"></button>
+          </span>
         </div>
         <a class="entry-title" href="{_esc(entry.get("url", "#"))}" target="_blank" rel="noopener">{_esc(entry.get("title", ""))}</a>
         {snippet}
@@ -140,11 +161,17 @@ def _render_entry(entry: dict, is_new: bool) -> str:
 def _render_controls_bar(sources_present: list[str]) -> str:
     if not sources_present:
         return ""
-    chips = "".join(
+    source_chips = "".join(
         f'<label class="chip">'
         f'<input type="checkbox" class="source-filter" value="{_esc(s)}" checked>'
         f"{_esc(_source_label(s))}</label>"
         for s in sources_present
+    )
+    weight_chips = "".join(
+        f'<label class="chip chip-weight chip-weight-{_esc(value)}">'
+        f'<input type="checkbox" class="weight-filter" value="{_esc(value)}" checked>'
+        f"{_esc(label)}</label>"
+        for value, label in _WEIGHT_OPTIONS
     )
     sort_options = "".join(
         f'<option value="{_esc(value)}">{_esc(label)}</option>' for value, label in _SORT_OPTIONS
@@ -152,7 +179,11 @@ def _render_controls_bar(sources_present: list[str]) -> str:
     return f"""<div class="controls-bar">
     <div class="control-row">
       <span class="filter-label">Visa källor</span>
-      {chips}
+      {source_chips}
+    </div>
+    <div class="control-row">
+      <span class="filter-label">Visa vikt</span>
+      {weight_chips}
     </div>
     <div class="control-row">
       <label class="filter-label" for="sort-select">Sortera efter</label>
@@ -184,7 +215,7 @@ def render_html(new_mentions: list[Mention], all_entries: list[dict], checked_at
         new_section = f"""<section class="panel highlight" id="new-panel">
         <h2>&#128276; <span id="new-count-label">{len(new_mentions)}</span> ny(a) nämning(ar) sedan förra kontrollen</h2>
         {category_sections}
-        <p class="filter-empty" id="new-filter-empty" hidden>Inga nya nämningar bland de valda källorna.</p>
+        <p class="filter-empty" id="new-filter-empty" hidden>Inga nya nämningar matchar de valda filtren.</p>
       </section>"""
     else:
         new_section = """<section class="panel quiet" id="new-panel">
@@ -233,11 +264,11 @@ def render_html(new_mentions: list[Mention], all_entries: list[dict], checked_at
     <h2>Alla nämningar hittills <span class="count" id="history-count-label">({len(history)})</span></h2>
     {truncation_note}
     <ul class="entries" id="history-list">{history_rows}</ul>
-    <p class="filter-empty" id="history-filter-empty" hidden>Inga nämningar matchar de valda källorna.</p>
+    <p class="filter-empty" id="history-filter-empty" hidden>Inga nämningar matchar de valda filtren.</p>
   </section>
 
   <footer>
-    <p>Genererad automatiskt av omvärldsbevakaren. Dubbelklicka på lanseringsskriptet igen för att uppdatera den här sidan. Lästa artiklar och valda källfilter sparas i den här webbläsaren.</p>
+    <p>Genererad automatiskt av omvärldsbevakaren. Dubbelklicka på lanseringsskriptet igen för att uppdatera den här sidan. Lästa artiklar, viktning och valda filter sparas i den här webbläsaren.</p>
   </footer>
 </main>
 <script>{_SCRIPT}</script>
@@ -257,6 +288,9 @@ _STYLE = """
   --accent: #2f6f5e;
   --accent-strong: #1f5445;
   --accent-soft: #e3efec;
+  --weight-positive: var(--accent);
+  --weight-neutral: #b8912f;
+  --weight-negative: #c0463f;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -270,6 +304,9 @@ _STYLE = """
     --accent: #6fc8ab;
     --accent-strong: #8ad8bd;
     --accent-soft: #223330;
+    --weight-positive: var(--accent);
+    --weight-neutral: #d9b45c;
+    --weight-negative: #e2726f;
   }
 }
 
@@ -370,6 +407,26 @@ h1 { font-size: clamp(26px, 4.5vw, 34px); margin: 0 0 10px; }
   cursor: pointer;
 }
 
+.chip-weight::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+.chip-weight-positive::before { background: var(--weight-positive); }
+.chip-weight-neutral::before { background: var(--weight-neutral); }
+.chip-weight-negative::before { background: var(--weight-negative); }
+.chip-weight-none::before { background: var(--ink-faint); }
+
+.chip-weight-positive:has(input:checked) { color: var(--weight-positive); background: color-mix(in srgb, var(--weight-positive) 15%, var(--paper)); border-color: var(--weight-positive); }
+.chip-weight-neutral:has(input:checked) { color: var(--weight-neutral); background: color-mix(in srgb, var(--weight-neutral) 15%, var(--paper)); border-color: var(--weight-neutral); }
+.chip-weight-negative:has(input:checked) { color: var(--weight-negative); background: color-mix(in srgb, var(--weight-negative) 15%, var(--paper)); border-color: var(--weight-negative); }
+.chip-weight input { accent-color: var(--ink-faint); }
+.chip-weight-positive input { accent-color: var(--weight-positive); }
+.chip-weight-neutral input { accent-color: var(--weight-neutral); }
+.chip-weight-negative input { accent-color: var(--weight-negative); }
+
 .panel {
   background: var(--paper-raised);
   border: 1px solid var(--line);
@@ -398,10 +455,15 @@ h1 { font-size: clamp(26px, 4.5vw, 34px); margin: 0 0 10px; }
 ul.entries { list-style: none; margin: 0; padding: 0; }
 
 li.entry {
-  padding: 14px 0;
+  padding: 14px 0 14px 10px;
+  margin-left: -10px;
   border-top: 1px solid var(--line);
+  border-left: 3px solid transparent;
 }
 li.entry:first-child { border-top: none; padding-top: 0; }
+li.entry[data-weight="positive"] { border-left-color: var(--weight-positive); }
+li.entry[data-weight="neutral"] { border-left-color: var(--weight-neutral); }
+li.entry[data-weight="negative"] { border-left-color: var(--weight-negative); }
 
 li.empty {
   color: var(--ink-faint);
@@ -418,8 +480,54 @@ li.empty {
 .entry-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 4px;
+}
+
+.entry-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.weight-buttons {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.weight-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+.weight-btn:hover { transform: scale(1.15); }
+.weight-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.weight-negative { background: color-mix(in srgb, var(--weight-negative) 20%, transparent); border-color: var(--weight-negative); }
+.weight-neutral  { background: color-mix(in srgb, var(--weight-neutral) 20%, transparent); border-color: var(--weight-neutral); }
+.weight-positive { background: color-mix(in srgb, var(--weight-positive) 20%, transparent); border-color: var(--weight-positive); }
+
+.weight-btn.is-selected { transform: scale(1.05); }
+.weight-btn.is-selected.weight-negative { background: var(--weight-negative); }
+.weight-btn.is-selected.weight-neutral { background: var(--weight-neutral); }
+.weight-btn.is-selected.weight-positive { background: var(--weight-positive); }
+.weight-btn.is-selected::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffffff;
 }
 
 .source-tag {
@@ -483,6 +591,8 @@ _SCRIPT = """
 (function () {
   var STORAGE_READ = "uppsalahem-monitor:read-ids";
   var STORAGE_HIDDEN = "uppsalahem-monitor:hidden-sources";
+  var STORAGE_HIDDEN_WEIGHTS = "uppsalahem-monitor:hidden-weights";
+  var STORAGE_WEIGHTS = "uppsalahem-monitor:weights";
   var STORAGE_SORT = "uppsalahem-monitor:sort";
   var DEFAULT_SORT = "published_desc";
 
@@ -504,8 +614,28 @@ _SCRIPT = """
     }
   }
 
+  function loadMap(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      var obj = raw ? JSON.parse(raw) : {};
+      return obj && typeof obj === "object" ? obj : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveMap(key, map) {
+    try {
+      localStorage.setItem(key, JSON.stringify(map));
+    } catch (e) {
+      /* t.ex. privat läge utan lagring - fortsätt utan att spara */
+    }
+  }
+
   var readIds = loadSet(STORAGE_READ);
   var hiddenSources = loadSet(STORAGE_HIDDEN);
+  var hiddenWeights = loadSet(STORAGE_HIDDEN_WEIGHTS);
+  var weights = loadMap(STORAGE_WEIGHTS);
 
   function markElementRead(li) {
     var badge = li.querySelector(".badge");
@@ -536,6 +666,55 @@ _SCRIPT = """
     a.addEventListener("click", function () {
       var li = a.closest("li.entry");
       if (li) markRead(li);
+    });
+  });
+
+  function applyWeightToElement(li, value) {
+    if (value && value !== "none") {
+      li.setAttribute("data-weight", value);
+    } else {
+      li.removeAttribute("data-weight");
+    }
+    li.querySelectorAll(".weight-btn").forEach(function (btn) {
+      var isSelected = btn.getAttribute("data-weight") === value;
+      btn.classList.toggle("is-selected", isSelected);
+      btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
+    });
+  }
+
+  function setWeight(id, value) {
+    // Samma artikel kan finnas både i "nya sedan sist" och i historiken -
+    // uppdatera alla förekomster, precis som för läst-markeringen.
+    document.querySelectorAll('li.entry[data-id="' + CSS.escape(id) + '"]').forEach(function (li) {
+      applyWeightToElement(li, value);
+    });
+    if (value && value !== "none") {
+      weights[id] = value;
+    } else {
+      delete weights[id];
+    }
+    saveMap(STORAGE_WEIGHTS, weights);
+    updateVisibility();
+  }
+
+  function applyWeightState() {
+    Object.keys(weights).forEach(function (id) {
+      document.querySelectorAll('li.entry[data-id="' + CSS.escape(id) + '"]').forEach(function (li) {
+        applyWeightToElement(li, weights[id]);
+      });
+    });
+  }
+
+  document.querySelectorAll(".weight-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var li = btn.closest("li.entry");
+      var id = li ? li.getAttribute("data-id") : null;
+      if (!id) return;
+      var value = btn.getAttribute("data-weight");
+      var current = weights[id];
+      // Klick på en redan vald vikt tar bort den (växlar tillbaka till
+      // "ej viktad") istället för att vara låst på ett val.
+      setWeight(id, current === value ? "none" : value);
     });
   });
 
@@ -573,10 +752,12 @@ _SCRIPT = """
     }
   }
 
-  function applyFilter() {
+  function updateVisibility() {
     document.querySelectorAll("li.entry[data-source]").forEach(function (li) {
       var source = li.getAttribute("data-source");
-      li.style.display = hiddenSources.has(source) ? "none" : "";
+      var weight = li.getAttribute("data-weight") || "none";
+      var hidden = hiddenSources.has(source) || hiddenWeights.has(weight);
+      li.style.display = hidden ? "none" : "";
     });
     updateCounts();
   }
@@ -590,7 +771,20 @@ _SCRIPT = """
         hiddenSources.add(checkbox.value);
       }
       saveSet(STORAGE_HIDDEN, hiddenSources);
-      applyFilter();
+      updateVisibility();
+    });
+  });
+
+  document.querySelectorAll(".weight-filter").forEach(function (checkbox) {
+    checkbox.checked = !hiddenWeights.has(checkbox.value);
+    checkbox.addEventListener("change", function () {
+      if (checkbox.checked) {
+        hiddenWeights.delete(checkbox.value);
+      } else {
+        hiddenWeights.add(checkbox.value);
+      }
+      saveSet(STORAGE_HIDDEN_WEIGHTS, hiddenWeights);
+      updateVisibility();
     });
   });
 
@@ -632,6 +826,7 @@ _SCRIPT = """
   }
 
   applyReadState();
-  applyFilter();
+  applyWeightState();
+  updateVisibility();
 })();
 """

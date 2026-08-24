@@ -9,7 +9,7 @@ from pathlib import Path
 DEFAULT_SEARCH_TERM = "Uppsalahem"
 
 # Vilka källor som är aktiva som standard. Kan skrivas över med --sources.
-DEFAULT_SOURCES = ["google_news", "svt_uppsala", "sr_uppland", "reddit", "bluesky"]
+DEFAULT_SOURCES = ["google_news", "bing_news", "svt_uppsala", "sr_uppland", "reddit", "bluesky"]
 
 # Var bevakningens tillstånd (sedda träffar + logg) sparas.
 BASE_DIR = Path(__file__).resolve().parent.parent

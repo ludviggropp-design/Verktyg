@@ -172,6 +172,41 @@ def test_render_html_omits_controls_bar_when_no_data():
     assert 'id="sort-select"' not in html_out
 
 
+def test_render_html_entries_include_three_weight_buttons():
+    m = make_mention()
+    html_out = render_html([], [m.to_dict()], datetime(2026, 8, 24, 9, 0))
+
+    assert 'class="weight-buttons"' in html_out
+    for value in ("negative", "neutral", "positive"):
+        assert f'class="weight-btn weight-{value}" data-weight="{value}"' in html_out
+
+
+def test_render_html_controls_bar_includes_weight_filter_chips():
+    m = make_mention()
+    html_out = render_html([], [m.to_dict()], datetime(2026, 8, 24, 9, 0))
+
+    assert "Visa vikt" in html_out
+    for value, label in [
+        ("positive", "Positiv"),
+        ("neutral", "Neutral"),
+        ("negative", "Negativ"),
+        ("none", "Ej viktad"),
+    ]:
+        assert f'class="chip chip-weight chip-weight-{value}"' in html_out
+        assert f'<input type="checkbox" class="weight-filter" value="{value}" checked>{label}' in html_out
+
+
+def test_render_html_script_supports_toggling_and_persisting_weights():
+    # Skydd mot regression för viktningslogiken i klientens JS.
+    html_out = render_html([], [], datetime(2026, 8, 24, 9, 0))
+    assert "uppsalahem-monitor:weights" in html_out
+    assert "uppsalahem-monitor:hidden-weights" in html_out
+    assert "function setWeight(id, value)" in html_out
+    assert "function applyWeightState()" in html_out
+    # Klick på en redan vald vikt ska växla tillbaka till "ej viktad".
+    assert 'setWeight(id, current === value ? "none" : value)' in html_out
+
+
 class TestParseAnyDatetime:
     def test_parses_rfc822_rss_date(self):
         dt = _parse_any_datetime("Mon, 24 Aug 2026 08:00:00 GMT")
