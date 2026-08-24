@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from monitor.models import Mention
-from monitor.report_html import render_html
+from monitor.report_html import _parse_any_datetime, render_html
 
 
 def make_mention(title="Uppsalahem bygger nytt", url="https://example.com/1", **kwargs):
@@ -15,7 +15,7 @@ def test_render_html_shows_new_mentions_grouped_by_category():
     ]
     html_out = render_html(new, [m.to_dict() for m in new], datetime(2026, 8, 24, 14, 32))
 
-    assert "2 ny(a) nämning(ar)" in html_out
+    assert '>2</span> ny(a) nämning(ar)' in html_out
     assert "Redaktionellt" in html_out
     assert "Socialt" in html_out
     assert "Uppsalahem bygger nytt" in html_out
@@ -50,3 +50,98 @@ def test_render_html_marks_history_items_seen_before_as_not_new():
     # i historiklistan; den gamla ska aldrig ha en.
     assert html_out.count('<span class="badge">NY</span>') == 2
     assert "Gammal artikel" in html_out
+
+
+def test_render_html_sorts_history_by_publish_date_not_discovery_order():
+    # "old_news" hittades sist av verktyget (senast i loggen) men handlar om
+    # en äldre nyhet; "recent_news" hittades tidigare men är en färskare
+    # nyhet. Rapporten ska visa den färskaste nyheten först.
+    old_news = make_mention(title="Gammal nyhet", url="https://example.com/old",
+                             published_at="Mon, 01 Jan 2024 08:00:00 GMT").to_dict()
+    old_news["checked_at"] = "2026-08-24T10:00:00+00:00"
+
+    recent_news = make_mention(title="Färsk nyhet", url="https://example.com/recent",
+                                published_at="Mon, 24 Aug 2026 08:00:00 GMT").to_dict()
+    recent_news["checked_at"] = "2026-08-20T10:00:00+00:00"
+
+    html_out = render_html([], [old_news, recent_news], datetime(2026, 8, 24, 12, 0))
+
+    assert html_out.index("Färsk nyhet") < html_out.index("Gammal nyhet")
+
+
+def test_render_html_falls_back_to_checked_at_when_published_at_missing():
+    no_date = make_mention(title="Utan datum", url="https://example.com/no-date", published_at="").to_dict()
+    no_date["checked_at"] = "2026-08-24T10:00:00+00:00"
+
+    with_date = make_mention(title="Med datum", url="https://example.com/with-date",
+                              published_at="Mon, 01 Jan 2020 08:00:00 GMT").to_dict()
+    with_date["checked_at"] = "2020-01-01T10:00:00+00:00"
+
+    # Utan tolkningsbart publiceringsdatum faller den tillbaka på
+    # checked_at, som här är nyare än "with_date"s faktiska publiceringsdatum.
+    html_out = render_html([], [with_date, no_date], datetime(2026, 8, 24, 12, 0))
+
+    assert html_out.index("Utan datum") < html_out.index("Med datum")
+
+
+def test_render_html_includes_data_attributes_for_filtering_and_read_tracking():
+    m = make_mention(title="Uppsalahem-nyhet", url="https://example.com/1")
+    html_out = render_html([m], [m.to_dict()], datetime(2026, 8, 24, 9, 0))
+
+    assert f'data-id="{m.id}"' in html_out
+    assert 'data-source="google_news"' in html_out
+
+
+def test_render_html_same_mention_shares_id_across_new_and_history_panels():
+    # En träff som är ny finns med både i "nya sedan sist"-panelen och i
+    # historiklistan – de måste dela data-id så att klientens JS kan
+    # markera båda kopiorna som lästa när användaren klickar på endera.
+    m = make_mention(title="Uppsalahem-nyhet", url="https://example.com/1")
+    html_out = render_html([m], [m.to_dict()], datetime(2026, 8, 24, 9, 0))
+
+    assert html_out.count(f'data-id="{m.id}"') == 2
+
+
+def test_render_html_script_marks_all_matching_ids_as_read():
+    # Skydd mot regression: klientens markRead() ska hitta *alla* element
+    # med samma data-id, inte bara det som klickades.
+    html_out = render_html([], [], datetime(2026, 8, 24, 9, 0))
+    assert 'querySelectorAll(\'li.entry[data-id="\' + CSS.escape(id) + \'"]\')' in html_out
+
+
+def test_render_html_filter_bar_lists_present_sources_in_canonical_order():
+    reddit = Mention(source="reddit", category="socialt", title="Reddit-inlägg", url="https://example.com/r")
+    google = make_mention(title="Google-artikel", url="https://example.com/g")
+    entries = [reddit.to_dict(), google.to_dict()]
+
+    html_out = render_html([], entries, datetime(2026, 8, 24, 9, 0))
+
+    # google_news kommer före reddit i den kanoniska ordningen, oavsett
+    # ordningen de skickades in i.
+    assert html_out.index('value="google_news"') < html_out.index('value="reddit"')
+    assert "Google News" in html_out
+    assert "Reddit" in html_out
+
+
+def test_render_html_omits_filter_bar_when_no_data():
+    html_out = render_html([], [], datetime(2026, 8, 24, 9, 0))
+    assert "Visa källor" not in html_out
+    assert '<div class="filter-bar">' not in html_out
+
+
+class TestParseAnyDatetime:
+    def test_parses_rfc822_rss_date(self):
+        dt = _parse_any_datetime("Mon, 24 Aug 2026 08:00:00 GMT")
+        assert dt == datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+
+    def test_parses_iso_with_offset(self):
+        dt = _parse_any_datetime("2026-08-23T14:22:00+00:00")
+        assert dt == datetime(2026, 8, 23, 14, 22, tzinfo=timezone.utc)
+
+    def test_parses_iso_with_trailing_z_and_milliseconds(self):
+        dt = _parse_any_datetime("2026-08-24T08:00:00.000Z")
+        assert dt == datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+
+    def test_returns_none_for_empty_or_garbage(self):
+        assert _parse_any_datetime("") is None
+        assert _parse_any_datetime("inte ett datum") is None
