@@ -2,7 +2,9 @@
 
 Ett fristående Python-verktyg som bevakar när **Uppsalahem** nämns i:
 
-- **Redaktionellt material** – nyheter och press, via Google News RSS.
+- **Redaktionellt material** – dels brett via Google News RSS, dels riktat
+  mot lokala Uppsala-medier: **SVT Nyheter Uppsala** och **Sveriges Radio
+  P4 Uppland** (SR Uppland).
 - **Sociala medier** – via publika sök-API:er som inte kräver egna nycklar:
   Reddit och Bluesky.
 
@@ -29,7 +31,7 @@ python -m monitor.main
 python -m monitor.main --search-term "Uppsalahem AB"
 
 # Bevaka bara vissa källor
-python -m monitor.main --sources google_news,reddit
+python -m monitor.main --sources google_news,svt_uppsala,sr_uppland
 
 # Maskinläsbar output (t.ex. för att skicka vidare till Slack/e-post själv)
 python -m monitor.main --json
@@ -56,6 +58,19 @@ I `data/`-katalogen (skapas automatiskt, ligger utanför git):
 - `log.jsonl` – en logg-rad per ny träff som någonsin hittats, med
   tidsstämpel för när den upptäcktes. Bra underlag för statistik eller
   export till t.ex. ett kalkylark.
+
+## Källor
+
+| Namn (`--sources`) | Typ | Vad det är |
+| --- | --- | --- |
+| `google_news` | redaktionellt | Google News RSS, sökning på sökordet över alla svenska nyhetssajter Google indexerar. |
+| `svt_uppsala` | redaktionellt | SVT Nyheter Uppsalas lokala nyhetsflöde. Fast URL (inget sökord i själva flödet) – filtreras på sökordet i titel/beskrivning. |
+| `sr_uppland` | redaktionellt | Sveriges Radios öppna RSS-API för P4 Uppland (programid 114). Samma princip: fast flöde, filtreras på sökordet. Eftersom det är radioavsnitt hittas bara det som syns i avsnittens text (titel/beskrivning), inte allt som sägs i sändning. |
+| `reddit` | socialt | Reddits publika sök-API. |
+| `bluesky` | socialt | Blueskys publika sök-API (AT Protocol). |
+
+Alla RSS-baserade källor (`google_news`, `svt_uppsala`, `sr_uppland`) delar
+samma hämtnings- och parsningslogik i `monitor/sources/rss_utils.py`.
 
 ## Schemaläggning (cron)
 
