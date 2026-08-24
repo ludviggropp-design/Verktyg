@@ -55,3 +55,27 @@ def test_run_continues_when_one_source_fails(tmp_path, monkeypatch):
     )
     mentions = main.run(args)
     assert len(mentions) == 2
+
+
+def test_run_writes_html_report_by_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "SOURCE_REGISTRY", {"fake": fake_source})
+
+    args = main.parse_args(["--sources", "fake", "--data-dir", str(tmp_path)])
+    main.run(args)
+
+    report_path = tmp_path / "report.html"
+    assert report_path.exists()
+    content = report_path.read_text(encoding="utf-8")
+    assert "Träff 1" in content
+    assert "Träff 2" in content
+
+
+def test_run_skips_html_report_with_no_html_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "SOURCE_REGISTRY", {"fake": fake_source})
+
+    args = main.parse_args(
+        ["--sources", "fake", "--data-dir", str(tmp_path), "--no-html"]
+    )
+    main.run(args)
+
+    assert not (tmp_path / "report.html").exists()

@@ -11,10 +11,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from .config import DEFAULT_DATA_DIR, DEFAULT_SEARCH_TERM, DEFAULT_SOURCES
 from .models import Mention
+from .report_html import REPORT_FILENAME, render_html
 from .sources import SOURCE_REGISTRY
 from .state import State
 
@@ -49,6 +51,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Visa alla träffar från källorna, inte bara nya sedan förra körningen.",
     )
+    parser.add_argument(
+        "--no-html",
+        action="store_true",
+        help=f"Skriv inte {REPORT_FILENAME} i datakatalogen (skrivs annars vid varje körning).",
+    )
     return parser.parse_args(argv)
 
 
@@ -81,6 +88,10 @@ def run(args: argparse.Namespace) -> list[Mention]:
     state.mark_seen(all_mentions)
     state.append_log(new_mentions)
     state.save()
+
+    if not args.no_html:
+        html_content = render_html(new_mentions, state.read_log(), datetime.now())
+        (state.data_dir / REPORT_FILENAME).write_text(html_content, encoding="utf-8")
 
     return new_mentions
 
@@ -115,6 +126,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     mentions = run(args)
     report(mentions, args.json)
+    if not args.json and not args.no_html:
+        report_path = Path(args.data_dir) / REPORT_FILENAME
+        print(f"\nRapport sparad: {report_path}")
     return 0
 
 

@@ -40,3 +40,32 @@ def test_corrupt_seen_file_does_not_crash(tmp_path):
     (tmp_path / "seen.json").write_text("{not valid json", encoding="utf-8")
     state = State(tmp_path)
     assert state.is_new(make_mention()) is True
+
+
+def test_read_log_returns_empty_list_when_missing(tmp_path):
+    state = State(tmp_path)
+    assert state.read_log() == []
+
+
+def test_read_log_returns_all_appended_entries(tmp_path):
+    state = State(tmp_path)
+    state.append_log([make_mention("https://example.com/a"), make_mention("https://example.com/b")])
+    state.append_log([make_mention("https://example.com/c")])
+
+    entries = state.read_log()
+    assert len(entries) == 3
+    assert {e["url"] for e in entries} == {
+        "https://example.com/a",
+        "https://example.com/b",
+        "https://example.com/c",
+    }
+
+
+def test_read_log_skips_corrupt_lines(tmp_path):
+    state = State(tmp_path)
+    state.append_log([make_mention("https://example.com/a")])
+    with state.log_path.open("a", encoding="utf-8") as fh:
+        fh.write("{not valid json\n")
+
+    entries = state.read_log()
+    assert len(entries) == 1

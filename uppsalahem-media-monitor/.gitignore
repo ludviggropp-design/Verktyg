@@ -5,3 +5,4 @@ __pycache__/
 # Bevakarens tillstånd och historik är körningsspecifika, inte källkod.
 data/seen.json
 data/log.jsonl
+data/report.html

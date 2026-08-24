@@ -13,7 +13,20 @@ hämtar aktuella träffar, filtrerar fram de som faktiskt nämner sökordet,
 och rapporterar bara de som är **nya** sedan förra körningen. All historik
 sparas lokalt så inget krävs utöver filsystemet.
 
-## Installation
+## Snabbstart på Windows (ingen terminal krävs)
+
+1. Installera Python från [python.org/downloads](https://www.python.org/downloads/)
+   – kryssa i "Add python.exe to PATH" i installationsfönstret.
+2. Packa upp den här mappen (om du fått den som zip).
+3. Dubbelklicka på **`Kör bevakaren.bat`**.
+
+Första gången tar det en liten stund extra (den förbereder verktyget).
+Varje gång öppnas resultatet automatiskt som en webbsida,
+`data/report.html`, i din vanliga webbläsare – ingen kommandorad behövs
+för den löpande användningen. En fullständig, bebilderad
+steg-för-steg-guide finns separat om du vill ha mer stöd.
+
+## Installation (Mac/Linux, eller manuellt på Windows)
 
 ```bash
 cd uppsalahem-media-monitor
@@ -38,6 +51,9 @@ python -m monitor.main --json
 
 # Se alla aktuella träffar, inte bara nya sedan sist
 python -m monitor.main --include-seen
+
+# Hoppa över att skriva den lokala HTML-rapporten (t.ex. vid schemaläggning)
+python -m monitor.main --no-html
 ```
 
 Vid varje körning:
@@ -58,6 +74,10 @@ I `data/`-katalogen (skapas automatiskt, ligger utanför git):
 - `log.jsonl` – en logg-rad per ny träff som någonsin hittats, med
   tidsstämpel för när den upptäcktes. Bra underlag för statistik eller
   export till t.ex. ett kalkylark.
+- `report.html` – en läsbar webbsida med senaste körningens nya träffar
+  längst upp och hela historiken därunder. Skrivs om vid varje körning
+  om inte `--no-html` anges. Öppna filen direkt i webbläsaren, eller
+  låt `Kör bevakaren.bat` göra det åt dig.
 
 ## Källor
 
@@ -77,8 +97,11 @@ samma hämtnings- och parsningslogik i `monitor/sources/rss_utils.py`.
 Kör t.ex. varje timme och skicka utskriften till en loggfil:
 
 ```cron
-0 * * * * cd /path/till/uppsalahem-media-monitor && .venv/bin/python -m monitor.main >> monitor.log 2>&1
+0 * * * * cd /path/till/uppsalahem-media-monitor && .venv/bin/python -m monitor.main --no-html >> monitor.log 2>&1
 ```
+
+(`--no-html` är valfritt men praktiskt på en server utan webbläsare – utan
+flaggan skrivs `data/report.html` om vid varje körning ändå.)
 
 Vill du bara agera på nya träffar (t.ex. skicka notis) kan du kombinera med
 `--json` och ett eget litet skript/one-liner som läser stdout och postar

@@ -56,3 +56,20 @@ class State:
                 entry = m.to_dict()
                 entry["checked_at"] = checked_at
                 fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def read_log(self) -> list[dict]:
+        """Läser hela historikloggen (alla träffar som någonsin hittats)."""
+        if not self.log_path.exists():
+            return []
+        entries: list[dict] = []
+        with self.log_path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    # En trasig rad ska inte välta hela rapporten.
+                    continue
+        return entries
