@@ -109,6 +109,48 @@ def test_render_html_script_marks_all_matching_ids_as_read():
     assert 'querySelectorAll(\'li.entry[data-id="\' + CSS.escape(id) + \'"]\')' in html_out
 
 
+def test_render_html_entries_carry_published_and_discovered_timestamps():
+    m = make_mention(
+        title="Uppsalahem-nyhet",
+        url="https://example.com/1",
+        published_at="Mon, 24 Aug 2026 08:00:00 GMT",
+    )
+    entry = m.to_dict()
+    entry["checked_at"] = "2026-08-24T10:00:00+00:00"
+
+    html_out = render_html([], [entry], datetime(2026, 8, 24, 12, 0))
+
+    published_epoch = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc).timestamp()
+    discovered_epoch = datetime(2026, 8, 24, 10, 0, tzinfo=timezone.utc).timestamp()
+    assert f'data-published-ts="{published_epoch:.0f}"' in html_out
+    assert f'data-discovered-ts="{discovered_epoch:.0f}"' in html_out
+
+
+def test_render_html_falls_back_published_ts_to_discovered_when_unparseable():
+    entry = make_mention(title="Utan datum", url="https://example.com/no-date", published_at="").to_dict()
+    entry["checked_at"] = "2026-08-24T10:00:00+00:00"
+
+    html_out = render_html([], [entry], datetime(2026, 8, 24, 12, 0))
+
+    discovered_epoch = datetime(2026, 8, 24, 10, 0, tzinfo=timezone.utc).timestamp()
+    assert f'data-published-ts="{discovered_epoch:.0f}"' in html_out
+    assert f'data-discovered-ts="{discovered_epoch:.0f}"' in html_out
+
+
+def test_render_html_includes_sort_select_with_all_options():
+    m = make_mention()
+    html_out = render_html([], [m.to_dict()], datetime(2026, 8, 24, 9, 0))
+
+    assert 'id="sort-select"' in html_out
+    for value, label in [
+        ("published_desc", "Publicerad (senaste först)"),
+        ("published_asc", "Publicerad (äldsta först)"),
+        ("discovered_desc", "Upptäckt av verktyget (senaste först)"),
+        ("discovered_asc", "Upptäckt av verktyget (äldsta först)"),
+    ]:
+        assert f'<option value="{value}">{label}</option>' in html_out
+
+
 def test_render_html_filter_bar_lists_present_sources_in_canonical_order():
     reddit = Mention(source="reddit", category="socialt", title="Reddit-inlägg", url="https://example.com/r")
     google = make_mention(title="Google-artikel", url="https://example.com/g")
@@ -123,10 +165,11 @@ def test_render_html_filter_bar_lists_present_sources_in_canonical_order():
     assert "Reddit" in html_out
 
 
-def test_render_html_omits_filter_bar_when_no_data():
+def test_render_html_omits_controls_bar_when_no_data():
     html_out = render_html([], [], datetime(2026, 8, 24, 9, 0))
     assert "Visa källor" not in html_out
-    assert '<div class="filter-bar">' not in html_out
+    assert '<div class="controls-bar">' not in html_out
+    assert 'id="sort-select"' not in html_out
 
 
 class TestParseAnyDatetime:

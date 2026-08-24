@@ -5,10 +5,12 @@ att läsa terminalens textutskrift.
 
 Sidan har lite egen JavaScript-logik (ingen server, allt lokalt i
 webbläsaren):
-- Nämningar sorteras efter när nyheten faktiskt publicerades, inte när
-  verktyget hittade den.
-- Källfilter (kryssrutor) för att bara visa vissa kanaler, kommer ihåg
-  valet i webbläsarens localStorage till nästa körning.
+- Sortering: användaren väljer om listan ska ordnas efter när nyheten
+  publicerades eller när verktyget upptäckte den, i valfri riktning.
+  Publicerad (senaste först) är förvalt.
+- Källfilter (kryssrutor) för att bara visa vissa kanaler.
+- Både sortering och källfilter kommer ihågs i webbläsarens localStorage
+  till nästa körning.
 - Klickar man på en artikel markeras den som läst (också i localStorage)
   och NY-märkningen försvinner direkt, utan att sidan behöver laddas om.
 """
@@ -88,15 +90,28 @@ def _parse_any_datetime(text: str) -> datetime | None:
         return None
 
 
-def _sort_key(entry: dict) -> datetime:
-    """Sorteringsnyckel: när nyheten publicerades om det går att tolka,
-    annars när verktyget upptäckte den, annars längst bak.
+def _entry_timestamps(entry: dict) -> tuple[float, float]:
+    """Returnerar (publicerad, upptäckt) som Unix-epoker i sekunder.
+
+    Går det inte att tolka ett publiceringsdatum faller det tillbaka på när
+    verktyget upptäckte träffen, så både sortering på servern (förvalet)
+    och sorteringsväljaren i webbläsaren alltid har något att gå på.
     """
-    return (
-        _parse_any_datetime(entry.get("published_at", ""))
-        or _parse_any_datetime(entry.get("checked_at", ""))
-        or datetime.min.replace(tzinfo=timezone.utc)
-    )
+    published_dt = _parse_any_datetime(entry.get("published_at", ""))
+    discovered_dt = _parse_any_datetime(entry.get("checked_at", ""))
+    discovered_ts = discovered_dt.timestamp() if discovered_dt else 0.0
+    published_ts = published_dt.timestamp() if published_dt else discovered_ts
+    return published_ts, discovered_ts
+
+
+# Sorteringsalternativ som visas i väljaren på sidan. Värdet är det som
+# skickas till klientens JS (matchar data-published-ts/data-discovered-ts).
+_SORT_OPTIONS = [
+    ("published_desc", "Publicerad (senaste först)"),
+    ("published_asc", "Publicerad (äldsta först)"),
+    ("discovered_desc", "Upptäckt av verktyget (senaste först)"),
+    ("discovered_asc", "Upptäckt av verktyget (äldsta först)"),
+]
 
 
 def _render_entry(entry: dict, is_new: bool) -> str:
@@ -109,8 +124,9 @@ def _render_entry(entry: dict, is_new: bool) -> str:
     meta = f'<div class="entry-meta">{"".join(meta_bits)}</div>' if meta_bits else ""
     snippet = f'<p class="snippet">{_esc(entry.get("snippet", ""))}</p>' if entry.get("snippet") else ""
     source = entry.get("source", "")
+    published_ts, discovered_ts = _entry_timestamps(entry)
 
-    return f"""<li class="entry" data-id="{_esc(entry.get('id', ''))}" data-source="{_esc(source)}">
+    return f"""<li class="entry" data-id="{_esc(entry.get('id', ''))}" data-source="{_esc(source)}" data-published-ts="{published_ts:.0f}" data-discovered-ts="{discovered_ts:.0f}">
         <div class="entry-head">
           <span class="source-tag">{_esc(_source_label(source))}</span>
           {badge}
@@ -121,7 +137,7 @@ def _render_entry(entry: dict, is_new: bool) -> str:
       </li>"""
 
 
-def _render_filter_bar(sources_present: list[str]) -> str:
+def _render_controls_bar(sources_present: list[str]) -> str:
     if not sources_present:
         return ""
     chips = "".join(
@@ -130,9 +146,18 @@ def _render_filter_bar(sources_present: list[str]) -> str:
         f"{_esc(_source_label(s))}</label>"
         for s in sources_present
     )
-    return f"""<div class="filter-bar">
-    <span class="filter-label">Visa källor</span>
-    {chips}
+    sort_options = "".join(
+        f'<option value="{_esc(value)}">{_esc(label)}</option>' for value, label in _SORT_OPTIONS
+    )
+    return f"""<div class="controls-bar">
+    <div class="control-row">
+      <span class="filter-label">Visa källor</span>
+      {chips}
+    </div>
+    <div class="control-row">
+      <label class="filter-label" for="sort-select">Sortera efter</label>
+      <select id="sort-select">{sort_options}</select>
+    </div>
   </div>"""
 
 
@@ -167,7 +192,7 @@ def render_html(new_mentions: list[Mention], all_entries: list[dict], checked_at
         <p>Allt är precis som förut just nu. Kör verktyget igen senare för att kolla på nytt.</p>
       </section>"""
 
-    history = sorted(all_entries, key=_sort_key, reverse=True)
+    history = sorted(all_entries, key=lambda e: _entry_timestamps(e)[0], reverse=True)
     truncated = len(history) > MAX_HISTORY_ITEMS
     shown = history[:MAX_HISTORY_ITEMS]
     history_rows = "".join(_render_entry(e, is_new=e.get("id") in new_ids) for e in shown)
@@ -182,7 +207,7 @@ def render_html(new_mentions: list[Mention], all_entries: list[dict], checked_at
     sources_present = _ordered_sources(
         {m.source for m in new_mentions} | {e.get("source", "") for e in all_entries} - {""}
     )
-    filter_bar = _render_filter_bar(sources_present)
+    controls_bar = _render_controls_bar(sources_present)
 
     return f"""<!doctype html>
 <html lang="sv">
@@ -197,10 +222,10 @@ def render_html(new_mentions: list[Mention], all_entries: list[dict], checked_at
   <header>
     <p class="eyebrow">Omvärldsbevakning</p>
     <h1>Uppsalahem i media och sociala kanaler</h1>
-    <p class="checked-at">Senast kontrollerad: {_esc(_format_checked_at(checked_at))} · sorterat efter publiceringsdatum</p>
+    <p class="checked-at">Senast kontrollerad: {_esc(_format_checked_at(checked_at))}</p>
   </header>
 
-  {filter_bar}
+  {controls_bar}
 
   {new_section}
 
@@ -283,16 +308,22 @@ h1 { font-size: clamp(26px, 4.5vw, 34px); margin: 0 0 10px; }
 
 .checked-at { color: var(--ink-soft); margin: 0; font-size: 14.5px; }
 
-.filter-bar {
+.controls-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 22px;
+  padding: 14px 16px;
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.control-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 10px;
-  margin-bottom: 22px;
-  padding: 12px 16px;
-  background: var(--paper-raised);
-  border: 1px solid var(--line);
-  border-radius: 999px;
 }
 
 .filter-label {
@@ -301,6 +332,17 @@ h1 { font-size: clamp(26px, 4.5vw, 34px); margin: 0 0 10px; }
   letter-spacing: 0.05em;
   color: var(--ink-faint);
   margin-right: 4px;
+}
+
+#sort-select {
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
 }
 
 .chip {
@@ -441,6 +483,8 @@ _SCRIPT = """
 (function () {
   var STORAGE_READ = "uppsalahem-monitor:read-ids";
   var STORAGE_HIDDEN = "uppsalahem-monitor:hidden-sources";
+  var STORAGE_SORT = "uppsalahem-monitor:sort";
+  var DEFAULT_SORT = "published_desc";
 
   function loadSet(key) {
     try {
@@ -549,6 +593,43 @@ _SCRIPT = """
       applyFilter();
     });
   });
+
+  function applySort(value) {
+    var list = document.getElementById("history-list");
+    if (!list) return;
+    var items = Array.prototype.slice.call(list.querySelectorAll("li.entry"));
+    if (!items.length) return;
+
+    var field = value.indexOf("discovered") === 0 ? "discoveredTs" : "publishedTs";
+    var direction = value.indexOf("_asc") !== -1 ? 1 : -1;
+
+    items.sort(function (a, b) {
+      var av = parseFloat(a.dataset[field] || "0");
+      var bv = parseFloat(b.dataset[field] || "0");
+      return (av - bv) * direction;
+    });
+    items.forEach(function (li) { list.appendChild(li); });
+  }
+
+  var sortSelect = document.getElementById("sort-select");
+  if (sortSelect) {
+    var savedSort = DEFAULT_SORT;
+    try {
+      savedSort = localStorage.getItem(STORAGE_SORT) || DEFAULT_SORT;
+    } catch (e) {
+      /* t.ex. privat läge utan lagring - kör med förvalet */
+    }
+    sortSelect.value = savedSort;
+    applySort(savedSort);
+    sortSelect.addEventListener("change", function () {
+      try {
+        localStorage.setItem(STORAGE_SORT, sortSelect.value);
+      } catch (e) {
+        /* fortsätt även om valet inte kunde sparas */
+      }
+      applySort(sortSelect.value);
+    });
+  }
 
   applyReadState();
   applyFilter();
